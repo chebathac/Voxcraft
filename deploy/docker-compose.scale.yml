@@ -1,0 +1,50 @@
+# Multi-Node Horizontal Scaling Stack (Redis Shared State + N Game Server Pods + NGINX LB)
+# Example:
+#   docker compose -f deploy/docker-compose.scale.yml up --build --scale game-node=8
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  game-node:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      REDIS_URL: redis://redis:6379
+      SHARD_PLAYER_CAP: 120
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 4
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    restart: unless-stopped
+
+  load-balancer:
+    image: nginx:1.27-alpine
+    ports:
+      - "3000:80"
+    volumes:
+      - ./nginx-lb.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - game-node
+    restart: unless-stopped
+
+volumes:
+  redis_data:

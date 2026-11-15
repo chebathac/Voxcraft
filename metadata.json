@@ -1,0 +1,6 @@
+{
+  "name": "VoxelCraft Multiplayer",
+  "description": "A 3D multiplayer voxel sandbox world inspired by Minecraft featuring real-time multiplayer, block building, procedural terrain, biomes, day-night cycle, custom skins, and chat.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
