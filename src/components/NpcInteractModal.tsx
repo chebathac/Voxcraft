@@ -35,12 +35,14 @@ export const NpcInteractModal: React.FC<NpcInteractModalProps> = ({
   const [speechText, setSpeechText] = useState('');
   const [tipIndex, setTipIndex] = useState(0);
   const [healUsed, setHealUsed] = useState(false);
+  const [isLoadingAi, setIsLoadingAi] = useState(false);
 
   useEffect(() => {
     if (isOpen && npcData) {
       setSpeechText(npcData.greetings[0] || `Hello! Good to see you around.`);
       setTipIndex(0);
       setHealUsed(false);
+      setIsLoadingAi(false);
     }
   }, [isOpen, npcData?.id]);
 
@@ -50,7 +52,30 @@ export const NpcInteractModal: React.FC<NpcInteractModalProps> = ({
   const giftReady = npcData.giftReadyInSec <= 0;
   const needsHeal = playerHealth < playerMaxHealth;
 
-  const handleAskTip = () => {
+  const handleAskTip = async () => {
+    setIsLoadingAi(true);
+    try {
+      const res = await fetch('/api/npc/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          npcName: npcData.name,
+          npcRole: npcData.role,
+          playerMessage: "Give me some advice or a survival secret for this world!",
+          context: `Player health is ${playerHealth}/${playerMaxHealth}. NPC is a ${npcData.role}.`,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.reply) {
+          setSpeechText(data.reply);
+          onTalk(npcData.id);
+          setIsLoadingAi(false);
+          return;
+        }
+      }
+    } catch {}
+    setIsLoadingAi(false);
     const pool = [...npcData.tips, ...npcData.greetings];
     const nextIdx = (tipIndex + 1) % pool.length;
     setTipIndex(nextIdx);
@@ -147,11 +172,12 @@ export const NpcInteractModal: React.FC<NpcInteractModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               type="button"
+              disabled={isLoadingAi}
               onClick={handleAskTip}
               className="flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-xs font-bold text-slate-100 hover:bg-white/10 active:scale-[0.98] transition-all cursor-pointer"
             >
-              <MessageCircle className="h-4 w-4 text-cyan-300" />
-              <span>Chat / Ask World Tip</span>
+              <MessageCircle className={`h-4 w-4 text-cyan-300 ${isLoadingAi ? 'animate-spin' : ''}`} />
+              <span>{isLoadingAi ? 'Consulting Gemini AI...' : 'Chat / Ask World Tip'}</span>
             </button>
 
             <button

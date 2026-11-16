@@ -83,6 +83,7 @@ import { BottomControlDock } from './components/BottomControlDock';
 import { MobileControls } from './components/MobileControls';
 import { EmotesModal } from './components/EmotesModal';
 import { EnchantPotionModal } from './components/EnchantPotionModal';
+import { OrientationLock } from './components/OrientationLock';
 
 export default function App() {
   const initialInvite = React.useMemo(() => {
@@ -203,6 +204,14 @@ function VoxelGameSession({
   const [health, setHealth] = useState(20);
   const [maxHealth] = useState(20);
   const [isTakingDamage, setIsTakingDamage] = useState(false);
+  const [hunger, setHunger] = useState(20);
+  const [maxHunger] = useState(20);
+  const [xp, setXp] = useState(0);
+  const [xpLevel, setXpLevel] = useState(1);
+  const [xpToNextLevel, setXpToNextLevel] = useState(100);
+  const [blocksMinedTotal, setBlocksMinedTotal] = useState(0);
+  const [mobsKilledTotal, setMobsKilledTotal] = useState(0);
+  const [timeSurvivedSec, setTimeSurvivedSec] = useState(0);
 
   // Modals & Overlays
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
@@ -925,6 +934,13 @@ function VoxelGameSession({
     if (weapon.special === 'fire') totalDmg += 2;
     if (weapon.special === 'void') totalDmg += 3;
 
+    // Critical Hit: attacking while falling in mid-air deals 1.5x damage + 3D starburst particles
+    const isCritical = !player.isGrounded && player.velocity.y < -0.2;
+    if (isCritical) {
+      totalDmg = Math.round(totalDmg * 1.5);
+      player.spawnCriticalHitParticles(hitMob.position.x, hitMob.position.y + 0.8, hitMob.position.z);
+    }
+
     const knock = hitMob.position.clone().sub(player.position).multiplyScalar(weapon.knockback);
     mobMgr.attackMob(hitMob, totalDmg, knock, dropMgr || undefined);
 
@@ -1184,6 +1200,16 @@ function VoxelGameSession({
       setHealth(newHealth);
     };
 
+    player.onHungerChange = (newHunger) => {
+      setHunger(newHunger);
+    };
+
+    player.onXpChange = (newXp, newLevel, newToNext) => {
+      setXp(newXp);
+      setXpLevel(newLevel);
+      setXpToNextLevel(newToNext);
+    };
+
     let damageTimeout: ReturnType<typeof setTimeout> | null = null;
     player.onDamage = () => {
       setIsTakingDamage(true);
@@ -1292,6 +1318,12 @@ function VoxelGameSession({
       world.updateMeshes(2, player.position.x, player.position.z);
       multiplayerRef.current?.sendBlockChange(bx, by, bz, BlockType.AIR);
       progressStatsRef.current.blocksMined += 1;
+      setBlocksMinedTotal((prev) => prev + 1);
+      player.addXp(
+        oldBlock === BlockType.DIAMOND_ORE ? 8 :
+        oldBlock === BlockType.GOLD_ORE ? 4 :
+        oldBlock === BlockType.IRON_ORE ? 2 : 1
+      );
       if (oldBlock === BlockType.IRON_ORE) unlockAchievement('acquire_hardware');
       if (oldBlock === BlockType.DIAMOND_ORE) unlockAchievement('diamonds_to_you');
       if (
@@ -1430,6 +1462,16 @@ function VoxelGameSession({
       ]);
     };
 
+    mobManager.onMobKilled = (def) => {
+      setMobsKilledTotal((prev) => prev + 1);
+      const xpGain = def.category === 'boss' ? 50 : def.category === 'hostile' ? 15 : 4;
+      player.addXp(xpGain);
+    };
+
+    const survivalTimer = setInterval(() => {
+      setTimeSurvivedSec((prev) => prev + 1);
+    }, 1000);
+
     // Load initial chunks around spawn
     world.loadAround(player.position.x, player.position.z, chunkLoadRadius);
 
@@ -1479,6 +1521,21 @@ function VoxelGameSession({
         if (player.velocity.y < -11.5) {
           unlockAchievement('cheating_death');
         }
+        return;
+      }
+
+      // 3. Eating edible crops / food
+      const isFood = (
+        heldBlock === BlockType.CARROT_CROP ||
+        heldBlock === BlockType.POTATO_CROP ||
+        heldBlock === BlockType.MELON_BLOCK ||
+        heldBlock === BlockType.BEETROOT_CROP ||
+        heldBlock === BlockType.WHEAT_CROP
+      );
+      if (isFood && player.hunger < player.maxHunger) {
+        player.eatFood(heldBlock === BlockType.MELON_BLOCK ? 4 : 3);
+        setF3Notice('+Food consumed! Hunger restored.');
+        setTimeout(() => setF3Notice(null), 1600);
         return;
       }
 
@@ -2196,6 +2253,8 @@ function VoxelGameSession({
         clearTimeout(villainAlertTimerRef.current);
         villainAlertTimerRef.current = null;
       }
+      clearInterval(survivalTimer);
+      soundFX.stopMusic();
       mobManager.dispose();
       dropManager.dispose();
       multiplayer.dispose();
@@ -2208,8 +2267,26 @@ function VoxelGameSession({
     };
   }, [activeMap.code, activeMap.name, activeMap.seed, computeProgressScore, cycleCameraMode, handleWeaponStrike]);
 
+  const handleShareInvite = useCallback(() => {
+    const inviteUrl = `${window.location.origin}${window.location.pathname}?map=${encodeURIComponent(activeMap.code)}&seed=${encodeURIComponent(activeMap.seed)}&name=${encodeURIComponent(activeMap.name)}`;
+    if (navigator.share) {
+      navigator.share({
+        title: `Join my VoxelCraft World: ${activeMap.name}`,
+        text: `Play 3D VoxelCraft with me! Map Code: ${activeMap.code}`,
+        url: inviteUrl,
+      }).catch(() => {});
+    } else {
+      navigator.clipboard.writeText(inviteUrl);
+      setF3Notice('Copied invite link to clipboard!');
+      setTimeout(() => setF3Notice(null), 2500);
+    }
+  }, [activeMap.code, activeMap.name, activeMap.seed]);
+
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black select-none touch-none">
+      {/* Mobile Orientation Warning & Auto-Rotate */}
+      <OrientationLock />
+
       {/* 3D WebGL Canvas Mount Container */}
       <div ref={canvasMountRef} className="absolute inset-0 cursor-crosshair touch-none" />
 
@@ -2296,6 +2373,15 @@ function VoxelGameSession({
         activeEmoteName={activeEmoteName}
         achievementToast={achievementToast}
         f3Notice={f3Notice}
+        hunger={hunger}
+        maxHunger={maxHunger}
+        xp={xp}
+        xpLevel={xpLevel}
+        xpToNextLevel={xpToNextLevel}
+        blocksMinedTotal={blocksMinedTotal}
+        mobsKilledTotal={mobsKilledTotal}
+        timeSurvivedSec={timeSurvivedSec}
+        onShareInvite={handleShareInvite}
       />
 
       {/* Chat Overlay */}

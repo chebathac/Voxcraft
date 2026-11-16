@@ -3494,16 +3494,43 @@ export class MobManager {
 
       const speedMag = Math.hypot(mob.velocity.x, mob.velocity.z);
       if (mob.limbs.length > 0) {
-        const swing = speedMag > 0.3 ? Math.sin(mob.animTime * 9.0) * 0.55 : 0;
-        mob.limbs.forEach((limb, idx) => {
-          limb.rotation.x = idx % 2 === 0 ? swing : -swing;
-        });
+        if (mob.def.type === 'zombie' || mob.def.type === 'drowned' || mob.def.type === 'husk') {
+          // Authentic Minecraft Zombie outstretched arms swaying forward
+          const armSway = Math.sin(mob.animTime * 3.2) * 0.12;
+          mob.limbs[0].rotation.x = -1.45 + armSway;
+          if (mob.limbs[1]) mob.limbs[1].rotation.x = -1.45 - armSway;
+          // Walking legs
+          if (mob.limbs.length >= 4) {
+            const legSwing = speedMag > 0.3 ? Math.sin(mob.animTime * 9.0) * 0.55 : 0;
+            mob.limbs[2].rotation.x = legSwing;
+            mob.limbs[3].rotation.x = -legSwing;
+          }
+        } else {
+          const swing = speedMag > 0.3 ? Math.sin(mob.animTime * 9.0) * 0.55 : 0;
+          mob.limbs.forEach((limb, idx) => {
+            limb.rotation.x = idx % 2 === 0 ? swing : -swing;
+          });
+        }
       }
       if (mob.wings && mob.wings.length > 0) {
-        const flap = Math.sin(mob.animTime * (mob.def.type === 'bee' ? 28 : 8)) * 0.55;
-        mob.wings.forEach((w, idx) => {
-          w.rotation.z = idx % 2 === 0 ? flap : -flap;
-        });
+        if (mob.def.type === 'ender_dragon') {
+          // Majestic Ender Dragon wings flap & bank
+          const flap = Math.sin(mob.animTime * 4.8) * 0.7;
+          mob.wings.forEach((w, idx) => {
+            w.rotation.z = idx % 2 === 0 ? flap : -flap;
+            w.rotation.y = idx % 2 === 0 ? flap * 0.25 : -flap * 0.25;
+          });
+          mob.group.rotation.z = THREE.MathUtils.clamp(-mob.velocity.x * 0.05, -0.38, 0.38);
+        } else {
+          const flap = Math.sin(mob.animTime * (mob.def.type === 'bee' ? 28 : 8)) * 0.55;
+          mob.wings.forEach((w, idx) => {
+            w.rotation.z = idx % 2 === 0 ? flap : -flap;
+          });
+        }
+      }
+      if (mob.def.type === 'wither') {
+        // Floating eerie bobbing motion
+        mob.group.position.y += Math.sin(mob.animTime * 3.5) * 0.12;
       }
       if (mob.orbitGroup) {
         mob.orbitGroup.rotation.y += dt * 3.0;

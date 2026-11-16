@@ -1035,6 +1035,39 @@ app.get('/api/maps/:code', async (req, res) => {
   });
 });
 
+// AI-Powered NPC Dialogue via Gemini 2.0
+app.post('/api/npc/chat', async (req, res) => {
+  const { npcName, npcRole, playerMessage, context } = req.body || {};
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    const fallbackReplies: Record<string, string> = {
+      Blacksmith: "Keep your blade sharp and your armor repaired! The Nether beasts don't show mercy.",
+      Alchemist: "Potions of Swiftness and Fire Resistance are essential if you plan to venture into the Nether caves.",
+      Farmer: "Wheat grows best near fresh water, and bone meal will speed up your crops immediately!",
+      Cartographer: "I chart the uncharted lands! Keep an eye on your mini-map for dangerous mob swarms.",
+      Guide: "Welcome traveler! Mine deep for diamonds, craft obsidian for portals, and conquer the Ender Dragon!",
+    };
+    const reply = fallbackReplies[npcRole] || `Greetings, traveler! I am ${npcName || 'a humble villager'}. Watch out for creepers after dark!`;
+    return res.json({ reply, source: 'offline-lore' });
+  }
+
+  try {
+    const { GoogleGenAI } = await import('@google/genai');
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: `You are ${npcName || 'a Minecraft NPC villager'}, whose role in the village is ${npcRole || 'Guide'}.
+Context: ${context || 'A player in the 3D voxel world of VoxelCraft has approached you to talk.'}
+Player says: "${playerMessage || 'Hello!'}"
+Reply in 1-2 concise, atmospheric, in-character sentences suitable for a medieval voxel RPG. Stay immersive and helpful.`,
+    });
+    return res.json({ reply: response.text || "Safe travels, friend!", source: 'gemini-ai' });
+  } catch (err: any) {
+    return res.json({ reply: `Stay alert, friend! The wilderness is dangerous tonight.`, source: 'fallback', error: err?.message });
+  }
+});
+
 // Kubernetes / Load-Balancer Liveness & Readiness Probes
 app.get('/healthz', (_req, res) => {
   res.status(200).json({ ok: true, nodeId: clusterBus.nodeId });

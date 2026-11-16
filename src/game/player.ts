@@ -81,6 +81,18 @@ export class Player {
   public onFallSaved?: () => void;
   public onArmorHit?: (damage: number) => void;
   public onToolBreakTick?: (block: BlockType) => void;
+  public onHungerChange?: (hunger: number, maxHunger: number) => void;
+  public onXpChange?: (xp: number, level: number, xpToNextLevel: number) => void;
+
+  // Hunger & Experience System
+  public hunger: number = 20;
+  public maxHunger: number = 20;
+  private hungerDrainTimer: number = 0;
+  private hungerStarveTimer: number = 0;
+  public xp: number = 0;
+  public xpLevel: number = 1;
+  public xpToNextLevel: number = 100;
+  private swimArmPhase: number = 0;
 
   // Emotes, Gear, Potions & Utility modes
   public activeEmote: { id: EmoteId; startedAt: number; duration: number } | null = null;
@@ -134,9 +146,17 @@ export class Player {
   public tpWeaponMount: THREE.Group;
   private walkCycleTime: number = 0;
 
-  // Voxel Break Debris Particles
+  // Voxel Break & Critical Hit Particles
   public particleGroup: THREE.Group;
   private activeParticles: { mesh: THREE.Mesh; velocity: THREE.Vector3; life: number }[] = [];
+  private critParticles: { mesh: THREE.Mesh; velocity: THREE.Vector3; life: number }[] = [];
+
+  // Dynamic 3D Viewmodel & Animation dynamics
+  private walkBobPhase: number = 0;
+  private landingBob: number = 0;
+  private wasGrounded: boolean = true;
+  public isEating: boolean = false;
+  public eatingTime: number = 0;
 
   // Footstep accumulator
   private stepDistance: number = 0;
@@ -491,6 +511,54 @@ export class Player {
     }
   }
 
+  // Trigger eating animation (hand raises to mouth with chewing motion)
+  public startEating(): void {
+    this.isEating = true;
+    this.eatingTime = 1.2;
+    soundFX.playEat();
+  }
+
+  // Restore hunger and trigger eating animation
+  public eatFood(restoreAmount: number = 4): void {
+    this.startEating();
+    this.hunger = Math.min(this.maxHunger, this.hunger + restoreAmount);
+    this.onHungerChange?.(this.hunger, this.maxHunger);
+  }
+
+  // Experience and leveling system
+  public addXp(amount: number): void {
+    if (amount <= 0) return;
+    this.xp += amount;
+    while (this.xp >= this.xpToNextLevel) {
+      this.xp -= this.xpToNextLevel;
+      this.xpLevel += 1;
+      this.xpToNextLevel = Math.floor(100 * Math.pow(1.15, this.xpLevel - 1));
+      soundFX.playLevelUp();
+    }
+    this.onXpChange?.(this.xp, this.xpLevel, this.xpToNextLevel);
+  }
+
+  // Spawn 3D critical hit starburst particles
+  public spawnCriticalHitParticles(x: number, y: number, z: number): void {
+    const critMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const count = 12;
+    soundFX.playCrit();
+
+    for (let i = 0; i < count; i++) {
+      const mesh = new THREE.Mesh(SHARED_PARTICLE_GEO, critMat);
+      mesh.position.set(x, y, z);
+      const angle = (i / count) * Math.PI * 2;
+      const speed = 2.5 + Math.random() * 2.0;
+      const vel = new THREE.Vector3(
+        Math.cos(angle) * speed,
+        Math.random() * 2.5 + 0.8,
+        Math.sin(angle) * speed
+      );
+      this.particleGroup.add(mesh);
+      this.critParticles.push({ mesh, velocity: vel, life: 0.35 + Math.random() * 0.2 });
+    }
+  }
+
   public updateParticles(delta: number): void {
     for (let i = this.activeParticles.length - 1; i >= 0; i--) {
       const p = this.activeParticles[i];
@@ -503,6 +571,22 @@ export class Player {
       if (p.life <= 0) {
         this.particleGroup.remove(p.mesh);
         this.activeParticles.splice(i, 1);
+      }
+    }
+
+    for (let i = this.critParticles.length - 1; i >= 0; i--) {
+      const cp = this.critParticles[i];
+      cp.life -= delta;
+      cp.velocity.y -= 12 * delta;
+      cp.mesh.position.addScaledVector(cp.velocity, delta);
+      cp.mesh.rotation.x += 6 * delta;
+      cp.mesh.rotation.z += 6 * delta;
+      const scale = Math.max(0.01, cp.life * 2.5);
+      cp.mesh.scale.set(scale, scale, scale);
+
+      if (cp.life <= 0) {
+        this.particleGroup.remove(cp.mesh);
+        this.critParticles.splice(i, 1);
       }
     }
   }
@@ -731,9 +815,34 @@ export class Player {
       this.hazardDamageTimer = Math.max(0, this.hazardDamageTimer - clampedDelta);
     }
 
-    // Natural Health Regeneration over time
-    // If not damaged recently (3.0 seconds cooldown) and health < maxHealth, regenerate +1 HP every 3.5 seconds
-    if (this.health > 0 && this.health < this.maxHealth) {
+    // Hunger Mechanics & Starvation
+    const isMoving = Math.hypot(this.velocity.x, this.velocity.z) > 0.1;
+    if (isMoving && !this.isFlying) {
+      this.hungerDrainTimer += clampedDelta;
+      const drainInterval = this.isSprinting ? 12 : 32;
+      if (this.hungerDrainTimer >= drainInterval) {
+        this.hungerDrainTimer = 0;
+        if (this.hunger > 0) {
+          this.hunger = Math.max(0, this.hunger - 1);
+          this.onHungerChange?.(this.hunger, this.maxHunger);
+        }
+      }
+    }
+
+    if (this.hunger === 0) {
+      this.hungerStarveTimer += clampedDelta;
+      if (this.hungerStarveTimer >= 4.0) {
+        this.hungerStarveTimer = 0;
+        if (this.health > 1) {
+          this.takeDamage(1);
+        }
+      }
+    } else {
+      this.hungerStarveTimer = 0;
+    }
+
+    // Natural Health Regeneration over time (requires hunger >= 16)
+    if (this.health > 0 && this.health < this.maxHealth && this.hunger >= 16) {
       const timeSinceDamage = performance.now() - this.lastDamageTime;
       if (timeSinceDamage >= 3000) {
         this.regenTimer += clampedDelta;
@@ -775,23 +884,66 @@ export class Player {
       }
     }
 
-    // Hand swing animation
+    // Landing spring bounce dynamics
+    if (!this.wasGrounded && this.isGrounded) {
+      this.landingBob = Math.min(0.065, Math.abs(this.velocity.y) * 0.008);
+    }
+    this.wasGrounded = this.isGrounded;
+    if (this.landingBob > 0.0005) {
+      this.landingBob *= Math.pow(0.04, clampedDelta);
+    } else {
+      this.landingBob = 0;
+    }
+
+    // Dynamic 3D Viewmodel Walk & Sprint Bobbing
+    const idleBob = Math.sin(performance.now() * 0.003) * 0.015;
+    if (this.isGrounded && horizontalSpeed > 0.3) {
+      this.walkBobPhase += clampedDelta * (this.isSprinting ? 12.5 : 8.5);
+      const bobX = Math.cos(this.walkBobPhase * 0.5) * (this.isSprinting ? 0.024 : 0.014);
+      const bobY = Math.abs(Math.sin(this.walkBobPhase)) * (this.isSprinting ? 0.028 : 0.018);
+      this.handGroup.position.x = bobX;
+      this.handGroup.position.y = idleBob - bobY - this.landingBob;
+    } else {
+      this.walkBobPhase = 0;
+      this.handGroup.position.x = 0;
+      this.handGroup.position.y = idleBob - this.landingBob;
+    }
+
+    // Eating Food Motion
+    if (this.eatingTime > 0) {
+      this.eatingTime -= clampedDelta;
+      const chew = Math.sin(performance.now() * 0.035) * 0.015;
+      this.handGroup.position.x = -0.06 + chew;
+      this.handGroup.position.y = 0.1 + chew;
+      this.handGroup.position.z = -0.12;
+      this.heldBlockMesh.rotation.x = 0.6;
+      if (this.eatingTime <= 0) {
+        this.isEating = false;
+        this.handGroup.position.set(0, 0, 0);
+        this.heldBlockMesh.rotation.set(0, 0, 0);
+      }
+    }
+
+    // Authentic Sweeping Slash / Mining Arc Animation
     if (this.handSwingTime > 0) {
       this.handSwingTime -= clampedDelta;
       const t = 1 - (this.handSwingTime / 0.28);
-      const angle = Math.sin(t * Math.PI) * 0.75;
-      this.handGroup.rotation.x = angle;
-      this.handGroup.rotation.z = -angle * 0.4;
-      this.heldBlockMesh.rotation.x = angle * 1.2;
-    } else {
+      const sinT = Math.sin(t * Math.PI);
+      // Multi-axis slash curve: pitch down + yaw swipe + roll tilt + forward thrust
+      this.handGroup.rotation.x = sinT * 0.82;
+      this.handGroup.rotation.y = -sinT * 0.42;
+      this.handGroup.rotation.z = -sinT * 0.32;
+      this.handGroup.position.z = -sinT * 0.08;
+      this.heldBlockMesh.rotation.x = sinT * 1.35;
+      this.fpWeaponMount.rotation.x = -0.65 + sinT * 1.45;
+      this.fpWeaponMount.rotation.z = -0.15 - sinT * 0.65;
+    } else if (this.eatingTime <= 0) {
       this.handGroup.rotation.set(0, 0, 0);
+      this.handGroup.position.z = 0;
       this.heldBlockMesh.rotation.set(0, 0, 0);
+      this.fpWeaponMount.rotation.set(-0.65, 0.25, -0.15);
       this.isSwinging = false;
     }
-
-    // Hand idle breathing bob
-    const idleBob = Math.sin(performance.now() * 0.003) * 0.015;
-    this.handGroup.position.y = idleBob;
 
     // Dynamic FOV punch during sprint (only update projection matrix when FOV changes noticeably)
     const targetFov = this.isSprinting && horizontalSpeed > 1 ? 82 : 75;
@@ -866,20 +1018,32 @@ export class Player {
         this.tpLeftArm.rotation.z = 0;
         this.tpRightArm.rotation.z = 0;
 
-        // Walk cycle animation in 3rd person & top view
+        // Walk & Swimming cycle animation in 3rd person & top view
         const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-        if (horizontalSpeed > 0.1 && this.isGrounded) {
-          this.walkCycleTime += 0.08 * (this.isSprinting ? 1.4 : 1.0);
-          const swing = Math.sin(this.walkCycleTime * 10) * 0.65;
-          this.tpLeftLeg.rotation.x = swing;
-          this.tpRightLeg.rotation.x = -swing;
-          this.tpLeftArm.rotation.x = -swing;
-          this.tpRightArm.rotation.x = swing;
+        if (this.isInWater) {
+          const swimTime = performance.now() * 0.008;
+          this.thirdPersonGroup.rotation.x = 0.4;
+          const paddle = Math.sin(swimTime) * 0.8;
+          const kick = Math.cos(swimTime) * 0.5;
+          this.tpLeftArm.rotation.x = paddle;
+          this.tpRightArm.rotation.x = -paddle;
+          this.tpLeftLeg.rotation.x = kick;
+          this.tpRightLeg.rotation.x = -kick;
         } else {
-          this.tpLeftLeg.rotation.x *= 0.8;
-          this.tpRightLeg.rotation.x *= 0.8;
-          this.tpLeftArm.rotation.x *= 0.8;
-          this.tpRightArm.rotation.x *= 0.8;
+          this.thirdPersonGroup.rotation.x = 0;
+          if (horizontalSpeed > 0.1 && this.isGrounded) {
+            this.walkCycleTime += 0.08 * (this.isSprinting ? 1.4 : 1.0);
+            const swing = Math.sin(this.walkCycleTime * 10) * 0.65;
+            this.tpLeftLeg.rotation.x = swing;
+            this.tpRightLeg.rotation.x = -swing;
+            this.tpLeftArm.rotation.x = -swing;
+            this.tpRightArm.rotation.x = swing;
+          } else {
+            this.tpLeftLeg.rotation.x *= 0.8;
+            this.tpRightLeg.rotation.x *= 0.8;
+            this.tpLeftArm.rotation.x *= 0.8;
+            this.tpRightArm.rotation.x *= 0.8;
+          }
         }
 
         if (this.isSwinging) {

@@ -673,7 +673,7 @@ export class VoxelWorld {
           const isEmissive =
             block === BlockType.LAVA ||
             block === BlockType.GLOWSTONE ||
-            !!BLOCK_DEFS[block]?.isLightEmitter;
+            !!BLOCK_DEFS[block as BlockType]?.isLightEmitter;
           const isWaterOrGlass =
             block === BlockType.WATER ||
             block === BlockType.GLASS ||

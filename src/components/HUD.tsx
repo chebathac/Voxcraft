@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, MoreVertical } from 'lucide-react';
+import { ArrowLeft, MoreVertical, Share2 } from 'lucide-react';
 import { BlockType, DimensionId } from '../game/types';
 import { BLOCK_DEFS } from '../game/textures';
 import { VoxelWorld } from '../game/world';
@@ -63,6 +63,15 @@ interface HUDProps {
   activeEmoteName?: string | null;
   achievementToast?: { name: string; rewardCoins: number } | null;
   f3Notice?: string | null;
+  hunger?: number;
+  maxHunger?: number;
+  xp?: number;
+  xpLevel?: number;
+  xpToNextLevel?: number;
+  blocksMinedTotal?: number;
+  mobsKilledTotal?: number;
+  timeSurvivedSec?: number;
+  onShareInvite?: () => void;
 }
 
 // Pixel-perfect Minecraft Heart Component (9x9 pixel art)
@@ -187,6 +196,15 @@ export const HUD: React.FC<HUDProps> = ({
   activeEmoteName = null,
   achievementToast = null,
   f3Notice = null,
+  hunger = 20,
+  maxHunger = 20,
+  xp = 0,
+  xpLevel = 1,
+  xpToNextLevel = 100,
+  blocksMinedTotal = 0,
+  mobsKilledTotal = 0,
+  timeSurvivedSec = 0,
+  onShareInvite,
 }) => {
   const [copiedMapCode, setCopiedMapCode] = React.useState(false);
   const currentBlockDef = BLOCK_DEFS[hotbar[selectedSlot]];
@@ -414,6 +432,17 @@ export const HUD: React.FC<HUDProps> = ({
           >
             {copiedMapCode ? 'Copied Code!' : `Code: ${mapCode}`}
           </button>
+          {onShareInvite && (
+            <button
+              type="button"
+              onClick={onShareInvite}
+              className="flex items-center gap-1 rounded-md border border-emerald-400/50 bg-emerald-950/80 px-2 py-0.5 font-bold text-emerald-300 hover:bg-emerald-600/30 transition-colors cursor-pointer backdrop-blur-sm whitespace-nowrap"
+              title="Share Multiplayer Invite Link"
+            >
+              <Share2 className="h-3 w-3" />
+              <span>Invite</span>
+            </button>
+          )}
           {onCycleCamera && (
             <button
               type="button"
@@ -568,8 +597,13 @@ export const HUD: React.FC<HUDProps> = ({
               className="text-base font-bold text-neutral-200 drop-shadow-[2px_2px_0px_#000000]"
               style={{ fontFamily: '"Silkscreen", "VT323", monospace' }}
             >
-              Score: <span className="text-amber-400">42</span>
+              Score: <span className="text-amber-400">{blocksMinedTotal * 5 + mobsKilledTotal * 25 + Math.floor(timeSurvivedSec / 2)}</span>
             </p>
+            <div className="flex items-center gap-4 text-xs text-neutral-300 bg-black/60 px-4 py-2 rounded-lg border border-white/10">
+              <span>⛏️ Mined: <strong className="text-white">{blocksMinedTotal}</strong></span>
+              <span>⚔️ Kills: <strong className="text-white">{mobsKilledTotal}</strong></span>
+              <span>⏱️ Survived: <strong className="text-white">{Math.floor(timeSurvivedSec / 60)}m {timeSurvivedSec % 60}s</strong></span>
+            </div>
 
             <button
               onClick={onRespawn}
@@ -706,22 +740,40 @@ export const HUD: React.FC<HUDProps> = ({
 
           {/* 10 Hunger Drumsticks */}
           <div className="flex items-center gap-[1px] sm:gap-0.5 origin-right scale-[0.78] sm:scale-100">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <span key={i} className="text-[#d97c36] drop-shadow-[1px_1px_0px_#000] text-sm leading-none">
-                🍗
-              </span>
-            ))}
+            {Array.from({ length: 10 }).map((_, i) => {
+              const pts = hunger - i * 2;
+              const isFull = pts >= 2;
+              const isHalf = pts === 1;
+              return (
+                <span
+                  key={i}
+                  className={`text-sm leading-none drop-shadow-[1px_1px_0px_#000] transition-opacity ${
+                    isFull
+                      ? 'text-[#d97c36] opacity-100'
+                      : isHalf
+                      ? 'text-[#d97c36] opacity-65'
+                      : 'text-[#442211] opacity-35 grayscale'
+                  }`}
+                  title={`Hunger: ${hunger}/${maxHunger}`}
+                >
+                  🍗
+                </span>
+              );
+            })}
           </div>
         </div>
 
         {/* Experience / Level Bar */}
         <div className="relative flex h-1.5 sm:h-2 w-full max-w-[332px] sm:max-w-[400px] items-center rounded-sm border border-black bg-[#1b2b1b]">
-          <div className="h-full w-[65%] bg-gradient-to-r from-[#55ff55] to-[#80ff80] shadow-[0_0_4px_#55ff55]" />
+          <div
+            className="h-full bg-gradient-to-r from-[#55ff55] to-[#80ff80] shadow-[0_0_4px_#55ff55] transition-all duration-300"
+            style={{ width: `${Math.min(100, Math.max(0, (xp / Math.max(1, xpToNextLevel)) * 100))}%` }}
+          />
           <span
             className="absolute left-1/2 -top-3 -translate-x-1/2 text-[10px] sm:text-xs font-bold text-[#80ff80] drop-shadow-[1px_1px_0px_#000]"
             style={{ fontFamily: '"Silkscreen", "VT323", monospace' }}
           >
-            42
+            {xpLevel}
           </span>
         </div>
 

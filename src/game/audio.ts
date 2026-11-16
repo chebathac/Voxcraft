@@ -509,6 +509,191 @@ class SoundFX {
     osc.start(now);
     osc.stop(now + 0.65);
   }
+
+  // Crunchy eating sound (procedural bite noise bursts)
+  public playEat() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime;
+    for (let bite = 0; bite < 3; bite++) {
+      const bTime = now + bite * 0.11;
+      const noise = this.ctx.createBufferSource();
+      const buf = this.createNoiseBuffer(0.06);
+      if (!buf) continue;
+      noise.buffer = buf;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(650 + Math.random() * 300, bTime);
+      filter.Q.setValueAtTime(4.0, bTime);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(this.volume * 0.45, bTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, bTime + 0.05);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      noise.start(bTime);
+      noise.stop(bTime + 0.06);
+    }
+  }
+
+  // Critical hit sparkle & swoosh
+  public playCrit() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.exponentialRampToValueAtTime(1760, now + 0.14);
+
+    gain.gain.setValueAtTime(this.volume * 0.5, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.18);
+  }
+
+  // Level up ascending chime
+  public playLevelUp() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+    const now = this.ctx.currentTime;
+    notes.forEach((freq, idx) => {
+      if (!this.ctx) return;
+      const t = now + idx * 0.08;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+
+      gain.gain.setValueAtTime(this.volume * 0.4, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.16);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(t);
+      osc.stop(t + 0.18);
+    });
+  }
+
+  // Water swimming splash sound
+  public playSwim() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const noise = this.createNoiseBuffer(0.18);
+    if (!noise) return;
+
+    const source = this.ctx.createBufferSource();
+    source.buffer = noise;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(450, this.ctx.currentTime);
+
+    const gain = this.ctx.createGain();
+    const now = this.ctx.currentTime;
+    gain.gain.setValueAtTime(this.volume * 0.28, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    source.start(now);
+  }
+
+  // Nether portal eerie hum
+  public playPortalHum() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime;
+    [110, 113.5].forEach((freq) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+
+      gain.gain.setValueAtTime(this.volume * 0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 1.2);
+    });
+  }
+
+  // Ambient procedural background synthesizer
+  private activeMusicNodes: (OscillatorNode | GainNode)[] = [];
+  public playMusic(mood: 'calm' | 'combat' | 'nether' = 'calm') {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    this.stopMusic();
+
+    const chords = mood === 'nether' 
+      ? [130.81, 155.56, 196.00] // C minor chord
+      : mood === 'combat'
+      ? [146.83, 174.61, 220.00] // D minor energetic
+      : [261.63, 329.63, 392.00, 523.25]; // C major calm piano-like chords
+
+    const now = this.ctx.currentTime;
+    chords.forEach((freq, idx) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = mood === 'combat' ? 'sawtooth' : 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+
+      const delay = idx * 0.35;
+      gain.gain.setValueAtTime(0.001, now + delay);
+      gain.gain.linearRampToValueAtTime(this.volume * (mood === 'combat' ? 0.08 : 0.12), now + delay + 1.5);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 6.5);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(now + delay);
+      osc.stop(now + delay + 6.6);
+
+      this.activeMusicNodes.push(osc, gain);
+    });
+  }
+
+  public stopMusic() {
+    this.activeMusicNodes.forEach((node) => {
+      try {
+        if ('stop' in node) (node as OscillatorNode).stop();
+        node.disconnect();
+      } catch {}
+    });
+    this.activeMusicNodes = [];
+  }
 }
 
 export const soundFX = new SoundFX();
