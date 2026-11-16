@@ -617,6 +617,10 @@ export class Player {
     const wasInWater = this.isInWater;
     this.isInWater = this.checkWater();
 
+    if (!wasInWater && this.isInWater) {
+      soundFX.playSwim();
+    }
+
     if (!this.isInWater && this.velocity.y < -10.5) {
       this.maxFallSpeedBeforeWater = Math.min(this.maxFallSpeedBeforeWater, this.velocity.y);
     }

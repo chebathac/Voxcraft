@@ -866,6 +866,7 @@ function VoxelGameSession({
       unlockAchievement('adventuring_time');
     }
     soundFX.playEndermanWarp();
+    soundFX.playMusic(targetDim === 'nether' ? 'nether' : 'calm');
     setChatMessages((prev) => [
       ...prev,
       {
@@ -1445,6 +1446,7 @@ function VoxelGameSession({
 
     mobManager.onVillainWave = (waveNumber, villainNames) => {
       const summary = villainNames.join(', ');
+      soundFX.playMusic('combat');
       setVillainAlert({ wave: waveNumber, text: summary });
       if (villainAlertTimerRef.current) clearTimeout(villainAlertTimerRef.current);
       villainAlertTimerRef.current = setTimeout(() => {
